@@ -23,10 +23,7 @@ Engine::~Engine() {
     vkDestroyCommandPool(device, gfxCmdPool, nullptr);
     vkDestroyPipeline(device, gfxPipeline, nullptr);
     vkDestroyPipelineLayout(device, gfxPipelineLayout, nullptr);
-    for (auto& imageView: swapchainImageViews) {
-        vkDestroyImageView(device, imageView, nullptr);
-    }
-    vkDestroySwapchainKHR(device, swapchain, nullptr);
+    cleanupSwapchain();
     vkDestroyDevice(device, nullptr);
     vkDestroySurfaceKHR(instance, surface, nullptr);
     vkDestroyInstance(instance, nullptr);
@@ -51,10 +48,17 @@ void Engine::run() {
         glfwPollEvents();
         
         vkWaitForFences(device, 1, &cmdBufferReady[currFrame], VK_TRUE, ~0ull);
-        vkResetFences(device, 1, &cmdBufferReady[currFrame]);
-
+        
         uint32_t imageIndex;
-        vkAcquireNextImageKHR(device, swapchain, ~0ull, imageAvailable[currFrame], VK_NULL_HANDLE, &imageIndex);
+        VkResult res = vkAcquireNextImageKHR(device, swapchain, ~0ull, imageAvailable[currFrame], VK_NULL_HANDLE, &imageIndex);
+        if (res==VK_ERROR_OUT_OF_DATE_KHR) {
+            recreateSwapchain();
+            continue;
+        } else if (res!=VK_SUBOPTIMAL_KHR && res!=VK_SUCCESS) {
+            throw std::runtime_error("VK Error: cannot retrieve swapchain image");
+        }
+        
+        vkResetFences(device, 1, &cmdBufferReady[currFrame]);
 
         vkResetCommandBuffer(gfxCmdBuffers[currFrame], 0);
         recordCmdBuffer(gfxCmdBuffers[currFrame], imageIndex);
@@ -104,7 +108,12 @@ void Engine::run() {
             .pImageIndices = &imageIndex,
             .pResults = nullptr,
         };
-        VK_CHECK(vkQueuePresentKHR(gfxQueue, &presentInfo));
+        res = vkQueuePresentKHR(gfxQueue, &presentInfo);
+        if (res==VK_ERROR_OUT_OF_DATE_KHR) {
+            recreateSwapchain();
+        } else if (res!=VK_SUCCESS && res!=VK_SUBOPTIMAL_KHR) {
+            throw std::runtime_error("VK Error: cannot present");
+        }
         
         currFrame=(currFrame+1)%MAX_FRAMES_IN_FLIGHT;
     }
@@ -190,7 +199,6 @@ void Engine::recordCmdBuffer(VkCommandBuffer& cmdBuffer, uint32_t imageIndex) {
 void Engine::createWindow() {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
     window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan window", nullptr, nullptr);
     glfwSetKeyCallback(window, key_callback);
 }
@@ -329,6 +337,17 @@ void Engine::createSwapchain() {
     for (uint32_t i=0; i<imageCount; i++) {
         createImageView(swapchainImages[i], swapchainImageViews[i], VK_IMAGE_ASPECT_COLOR_BIT, swapchainFormat);
     }
+}
+void Engine::recreateSwapchain() {
+    vkDeviceWaitIdle(device);
+    cleanupSwapchain();
+    createSwapchain();
+}
+void Engine::cleanupSwapchain() {
+    for (auto& imageView: swapchainImageViews) {
+        vkDestroyImageView(device, imageView, nullptr);
+    }
+    vkDestroySwapchainKHR(device, swapchain, nullptr);
 }
 void Engine::createImageView(VkImage& image, VkImageView& imageView, VkImageAspectFlags aspectMask, VkFormat format) {
     VkImageViewCreateInfo imageViewCI{

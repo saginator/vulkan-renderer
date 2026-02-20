@@ -27,6 +27,8 @@ struct Engine {
     void createSurface();
     void createDevice();
     void createSwapchain();
+    void recreateSwapchain();
+    void cleanupSwapchain();
     void createImageView(VkImage& image, VkImageView& imageView, VkImageAspectFlags aspectMask, VkFormat format);
     void createGfxPipelineLayout();
     void createGfxPipeline();
