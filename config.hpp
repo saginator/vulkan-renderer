@@ -1,0 +1,10 @@
+#pragma once
+#include <iostream>
+#include <vector>
+#include <set>
+#include <optional>
+#include <fstream>
+#include <vulkan/vulkan.hpp>
+#include <vulkan/vk_enum_string_helper.h>
+#define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
