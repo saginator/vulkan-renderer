@@ -17,6 +17,7 @@ Engine::Engine() {
     createCommandPool(presentCmdPool, queueFamilyIndices.presentFamily.value());
     createCommandPool(transferCmdPool, queueFamilyIndices.transferFamily.value());
     createVertexBuffer();
+    createIndexBuffer();
 }
 Engine::~Engine() {
     vkDestroyBuffer(device, vertexBuffer, nullptr);
@@ -173,7 +174,8 @@ void Engine::recordCmdBuffer(VkCommandBuffer& cmdBuffer, uint32_t imageIndex) {
         vkCmdBeginRendering(cmdBuffer, &renderingInfo);
         {
             vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gfxPipeline);
-            
+            vkCmdBindIndexBuffer(cmdBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+
             VkViewport viewport{
                 .x = 0.0f,
                 .y = 0.0f,
@@ -194,7 +196,7 @@ void Engine::recordCmdBuffer(VkCommandBuffer& cmdBuffer, uint32_t imageIndex) {
 
             vkCmdPushConstants(cmdBuffer, gfxPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pushConstants);
             
-            vkCmdDraw(cmdBuffer, 3, 1, 0, 0);
+            vkCmdDrawIndexed(cmdBuffer, (uint32_t)indices.size(), 1, 0, 0, 0);
         }
         vkCmdEndRendering(cmdBuffer);
     }
@@ -654,12 +656,13 @@ void Engine::createBuffer(VkBuffer& buffer, VkDeviceMemory& bufferMemory, VkDevi
     VkMemoryAllocateFlagsInfo allocateFlagsInfo{
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
         .pNext = nullptr,
-        .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR
+        .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR,
+        .deviceMask = 0
     };
     VkMemoryAllocateInfo allocateInfo{
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
         .pNext = &allocateFlagsInfo,
-        .allocationSize = size,
+        .allocationSize = memRequirements.size,
         .memoryTypeIndex = getMemoryTypeIndex(memRequirements.memoryTypeBits, memProperties)
     };
     VK_CHECK(vkAllocateMemory(device, &allocateInfo, nullptr, &bufferMemory));  
@@ -696,6 +699,26 @@ void Engine::createVertexBuffer() {
     vkFreeMemory(device, stagingBufferMemory, nullptr);
 
     pushConstants.vertexBufferAddress = vertexBufferAddress;
+}
+void Engine::createIndexBuffer() {
+    indexBufferSize = sizeof(indices[0])*indices.size();
+    createBuffer(indexBuffer, indexBufferMemory, indexBufferSize, 
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingBufferMemory;
+    createBuffer(stagingBuffer, stagingBufferMemory, indexBufferSize,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+    
+    void* data;
+    vkMapMemory(device, stagingBufferMemory, 0, indexBufferSize, 0, &data);
+    memcpy(data, indices.data(), (size_t)indexBufferSize);
+    vkUnmapMemory(device, stagingBufferMemory);
+
+    copyBuffer(stagingBuffer, indexBuffer, indexBufferSize);
+    
+    vkDestroyBuffer(device, stagingBuffer, nullptr);
+    vkFreeMemory(device, stagingBufferMemory, nullptr);
 }
 
 bool Engine::checkInstanceLayersSupport() {

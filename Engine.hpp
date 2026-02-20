@@ -47,6 +47,7 @@ struct Engine {
     void createBuffer(VkBuffer& buffer, VkDeviceMemory& bufferMemory, VkDeviceSize size, VkBufferUsageFlags usage, 
         VkMemoryPropertyFlags memProperties);
     void createVertexBuffer();
+    void createIndexBuffer();
 
     GLFWwindow* window;
     VkInstance instance;
@@ -71,6 +72,9 @@ struct Engine {
     VkDeviceMemory vertexBufferMemory;
     VkDeviceSize vertexBufferSize;
     VkDeviceAddress vertexBufferAddress;
+    VkBuffer indexBuffer;
+    VkDeviceMemory indexBufferMemory;
+    VkDeviceSize indexBufferSize;
     PushConstants pushConstants;
 
     const uint32_t WIDTH = 800;
@@ -88,9 +92,13 @@ struct Engine {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME
     };
     const std::vector<Vertex> vertices = {
-        {0.0f, -0.5f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-        {0.5f, 0.5f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f},
-        {-0.5f, 0.5f, 0.0f, 0.0f, 0.0f, 1.0, 0.0f, 0.0f}
+        {-0.5f, -0.5f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+        {0.5f, -0.5f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f},
+        {0.5f, 0.5f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f},
+        {-0.5f, 0.5f, 0.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f}
+    };
+    const std::vector<uint32_t> indices = {
+        0, 1, 2, 2, 3, 0
     };
 
     bool checkInstanceLayersSupport();
