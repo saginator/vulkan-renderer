@@ -16,8 +16,11 @@ Engine::Engine() {
     createCommandPool(gfxCmdPool, queueFamilyIndices.graphicsFamily.value());
     createCommandPool(presentCmdPool, queueFamilyIndices.presentFamily.value());
     createCommandPool(transferCmdPool, queueFamilyIndices.transferFamily.value());
+    createVertexBuffer();
 }
 Engine::~Engine() {
+    vkDestroyBuffer(device, vertexBuffer, nullptr);
+    vkFreeMemory(device, vertexBufferMemory, nullptr);
     vkDestroyCommandPool(device, transferCmdPool, nullptr);
     vkDestroyCommandPool(device, presentCmdPool, nullptr);
     vkDestroyCommandPool(device, gfxCmdPool, nullptr);
@@ -42,7 +45,7 @@ void Engine::run() {
     for (uint32_t i=0; i<MAX_FRAMES_IN_FLIGHT; i++) {
         createSemaphore(imageAvailable[i]);
         createSemaphore(renderingDone[i]);
-        createFence(cmdBufferReady[i]);
+        createFence(cmdBufferReady[i], VK_FENCE_CREATE_SIGNALED_BIT);
     }
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
@@ -188,6 +191,8 @@ void Engine::recordCmdBuffer(VkCommandBuffer& cmdBuffer, uint32_t imageIndex) {
                 .extent = swapchainExtent
             };
             vkCmdSetScissor(cmdBuffer, 0, 1, &scissor);
+
+            vkCmdPushConstants(cmdBuffer, gfxPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pushConstants);
             
             vkCmdDraw(cmdBuffer, 3, 1, 0, 0);
         }
@@ -267,8 +272,12 @@ void Engine::createDevice() {
 
     VkPhysicalDeviceFeatures features{};
     features.multiDrawIndirect = VK_TRUE;
+    VkPhysicalDeviceVulkan12Features features12{};
+    features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    features12.bufferDeviceAddress = VK_TRUE;
     VkPhysicalDeviceVulkan13Features features13{};
     features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    features13.pNext = &features12;
     features13.dynamicRendering = VK_TRUE;
     features13.synchronization2 = VK_TRUE;
     VkDeviceCreateInfo deviceCI{
@@ -374,14 +383,20 @@ void Engine::createImageView(VkImage& image, VkImageView& imageView, VkImageAspe
     VK_CHECK(vkCreateImageView(device, &imageViewCI, nullptr, &imageView));
 }
 void Engine::createGfxPipelineLayout() {
+    VkPushConstantRange pushConstantRange{
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        .offset = 0,
+        .size = sizeof(PushConstants)
+    };
+
     VkPipelineLayoutCreateInfo pipelineLayoutCI{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .pNext = nullptr,
         .flags = 0,
         .setLayoutCount = 0,
         .pSetLayouts = nullptr,
-        .pushConstantRangeCount = 0,
-        .pPushConstantRanges = nullptr
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &pushConstantRange
     };
     VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &gfxPipelineLayout));
 }
@@ -612,13 +627,75 @@ void Engine::createSemaphore(VkSemaphore& sem) {
     };
     VK_CHECK(vkCreateSemaphore(device, &semCI, nullptr, &sem));
 }
-void Engine::createFence(VkFence& fence) {
+void Engine::createFence(VkFence& fence, VkFenceCreateFlags flags) {
     VkFenceCreateInfo fenceCI{
         .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
         .pNext = nullptr,
-        .flags = VK_FENCE_CREATE_SIGNALED_BIT
+        .flags = flags
     };
     VK_CHECK(vkCreateFence(device, &fenceCI, nullptr, &fence));
+}
+void Engine::createBuffer(VkBuffer& buffer, VkDeviceMemory& bufferMemory, VkDeviceSize size, VkBufferUsageFlags usage,
+    VkMemoryPropertyFlags memProperties) {
+    VkBufferCreateInfo bufferCI{
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .size = size,
+        .usage = usage,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = 0,
+        .pQueueFamilyIndices = nullptr
+    };
+    VK_CHECK(vkCreateBuffer(device, &bufferCI, nullptr, &buffer));
+    VkMemoryRequirements memRequirements;
+    vkGetBufferMemoryRequirements(device, buffer, &memRequirements);
+
+    VkMemoryAllocateFlagsInfo allocateFlagsInfo{
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
+        .pNext = nullptr,
+        .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR
+    };
+    VkMemoryAllocateInfo allocateInfo{
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .pNext = &allocateFlagsInfo,
+        .allocationSize = size,
+        .memoryTypeIndex = getMemoryTypeIndex(memRequirements.memoryTypeBits, memProperties)
+    };
+    VK_CHECK(vkAllocateMemory(device, &allocateInfo, nullptr, &bufferMemory));  
+
+    VK_CHECK(vkBindBufferMemory(device, buffer, bufferMemory, 0));
+}
+void Engine::createVertexBuffer() {
+    vertexBufferSize = sizeof(vertices[0])*vertices.size();
+    createBuffer(vertexBuffer, vertexBufferMemory, vertexBufferSize, 
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | 
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT_KHR | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingBufferMemory;
+    createBuffer(stagingBuffer, stagingBufferMemory, vertexBufferSize,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+    
+    void* data;
+    vkMapMemory(device, stagingBufferMemory, 0, vertexBufferSize, 0, &data);
+    memcpy(data, vertices.data(), (size_t)vertexBufferSize);
+    vkUnmapMemory(device, stagingBufferMemory);
+
+    copyBuffer(stagingBuffer, vertexBuffer, vertexBufferSize);
+    
+    VkBufferDeviceAddressInfo bdaInfo{
+        .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+        .pNext = nullptr,
+        .buffer = vertexBuffer
+    };
+    vertexBufferAddress = vkGetBufferDeviceAddress(device, &bdaInfo);
+    
+    vkDestroyBuffer(device, stagingBuffer, nullptr);
+    vkFreeMemory(device, stagingBufferMemory, nullptr);
+
+    pushConstants.vertexBufferAddress = vertexBufferAddress;
 }
 
 bool Engine::checkInstanceLayersSupport() {
@@ -748,4 +825,56 @@ VkCommandBuffer Engine::allocateCommandBuffer(VkCommandPool& cmdPool) {
     VkCommandBuffer cmdBuffer;
     VK_CHECK(vkAllocateCommandBuffers(device, &allocateInfo, &cmdBuffer));
     return cmdBuffer;
+}
+uint32_t Engine::getMemoryTypeIndex(uint32_t typeFilter, VkMemoryPropertyFlags memProperties) {
+    VkPhysicalDeviceMemoryProperties pDeviceMemProps{};
+    vkGetPhysicalDeviceMemoryProperties(pDevice, &pDeviceMemProps);
+    for (uint32_t i=0; i<pDeviceMemProps.memoryTypeCount; i++) {
+        if ((typeFilter & (1<<i)) && (pDeviceMemProps.memoryTypes[i].propertyFlags & memProperties)==memProperties) {
+            return i;
+        }
+    }
+    throw std::runtime_error("VK Error: no suitable memory type for buffer");
+}
+void Engine::copyBuffer(VkBuffer& srcBuffer, VkBuffer& dstBuffer, VkDeviceSize size) {
+    VkCommandBuffer cmdBuffer = allocateCommandBuffer(transferCmdPool);
+    
+    VkCommandBufferBeginInfo beginInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .pInheritanceInfo = nullptr
+    };
+    vkBeginCommandBuffer(cmdBuffer, &beginInfo);
+    VkBufferCopy region{
+        .srcOffset = 0,
+        .dstOffset = 0,
+        .size = size
+    };
+    vkCmdCopyBuffer(cmdBuffer, srcBuffer, dstBuffer, 1, &region);
+    vkEndCommandBuffer(cmdBuffer);
+
+    VkCommandBufferSubmitInfo cmdBufferSubmitInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+        .pNext = nullptr,
+        .commandBuffer = cmdBuffer,
+        .deviceMask = 0
+    };
+    VkSubmitInfo2 submitInfo{
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+        .pNext = nullptr,
+        .flags = 0,
+        .waitSemaphoreInfoCount = 0,
+        .pWaitSemaphoreInfos = nullptr,
+        .commandBufferInfoCount = 1,
+        .pCommandBufferInfos = &cmdBufferSubmitInfo,
+        .signalSemaphoreInfoCount = 0,
+        .pSignalSemaphoreInfos = nullptr
+    };
+
+    VkFence fence;
+    createFence(fence, 0);
+    VK_CHECK(vkQueueSubmit2(transferQueue, 1, &submitInfo, fence));
+    vkWaitForFences(device, 1, &fence, VK_TRUE, ~0ull);
+    vkDestroyFence(device, fence, nullptr);
 }

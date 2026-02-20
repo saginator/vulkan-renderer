@@ -15,6 +15,14 @@ struct SurfaceDetails {
     std::vector<VkSurfaceFormatKHR> formats;
     std::vector<VkPresentModeKHR> modes;
 };
+struct Vertex {
+    float vx, vy, vz;
+    float nx, ny, nz;
+    float u, v;
+};
+struct PushConstants {
+    VkDeviceAddress vertexBufferAddress;
+};
 
 struct Engine {
     Engine();
@@ -35,7 +43,10 @@ struct Engine {
     void createShaderModule(std::vector<char> code, VkShaderModule& shaderModule);
     void createCommandPool(VkCommandPool& cmdPool, uint32_t queueFamilyIndex);
     void createSemaphore(VkSemaphore& sem);
-    void createFence(VkFence& fence);
+    void createFence(VkFence& fence, VkFenceCreateFlags flags);
+    void createBuffer(VkBuffer& buffer, VkDeviceMemory& bufferMemory, VkDeviceSize size, VkBufferUsageFlags usage, 
+        VkMemoryPropertyFlags memProperties);
+    void createVertexBuffer();
 
     GLFWwindow* window;
     VkInstance instance;
@@ -56,6 +67,12 @@ struct Engine {
     VkCommandPool gfxCmdPool;
     VkCommandPool presentCmdPool;
     VkCommandPool transferCmdPool;
+    VkBuffer vertexBuffer;
+    VkDeviceMemory vertexBufferMemory;
+    VkDeviceSize vertexBufferSize;
+    VkDeviceAddress vertexBufferAddress;
+    PushConstants pushConstants;
+
     const uint32_t WIDTH = 800;
     const uint32_t HEIGHT = 600;
     const uint32_t MAX_FRAMES_IN_FLIGHT = 4;
@@ -70,6 +87,11 @@ struct Engine {
     std::vector<const char*> deviceExtensions = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME
     };
+    const std::vector<Vertex> vertices = {
+        {0.0f, -0.5f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+        {0.5f, 0.5f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f},
+        {-0.5f, 0.5f, 0.0f, 0.0f, 0.0f, 1.0, 0.0f, 0.0f}
+    };
 
     bool checkInstanceLayersSupport();
     bool checkInstanceExtensionsSupport();
@@ -81,4 +103,6 @@ struct Engine {
     VkPresentModeKHR choosePresentMode(std::vector<VkPresentModeKHR> modes);
     VkSurfaceFormatKHR chooseSurfaceFormat(std::vector<VkSurfaceFormatKHR> formats);
     VkCommandBuffer allocateCommandBuffer(VkCommandPool& cmdPool);
+    uint32_t getMemoryTypeIndex(uint32_t typeFilter, VkMemoryPropertyFlags memProperties);
+    void copyBuffer(VkBuffer& srcBuffer, VkBuffer& dstBuffer, VkDeviceSize size);
 };
