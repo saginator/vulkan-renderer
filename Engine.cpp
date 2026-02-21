@@ -28,9 +28,6 @@ Engine::Engine() {
     createIndexBuffer();
 }
 Engine::~Engine() {
-    vkDestroyImage(device, colorImage, nullptr);
-    vkDestroyImageView(device, colorImageView, nullptr);
-    vkFreeMemory(device, colorImageMemory, nullptr);
     vkDestroySampler(device, textureSampler, nullptr);
     vkDestroyImage(device, textureImage, nullptr);
     vkDestroyImageView(device, textureImageView, nullptr);
@@ -104,7 +101,7 @@ void Engine::run() {
             .pNext = nullptr,
             .semaphore = imageAvailable[currFrame],
             .value = 0,
-            .stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .stageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
             .deviceIndex = 0
         };
         VkSemaphoreSubmitInfo renderingDoneSubmitInfo{
@@ -138,7 +135,7 @@ void Engine::run() {
             .pImageIndices = &imageIndex,
             .pResults = nullptr,
         };
-        res = vkQueuePresentKHR(gfxQueue, &presentInfo);
+        res = vkQueuePresentKHR(presentQueue, &presentInfo);
         if (res==VK_ERROR_OUT_OF_DATE_KHR) {
             recreateSwapchain();
         } else if (res!=VK_SUCCESS && res!=VK_SUBOPTIMAL_KHR) {
@@ -147,7 +144,7 @@ void Engine::run() {
         
         currFrame=(currFrame+1)%MAX_FRAMES_IN_FLIGHT;
     }
-    vkQueueWaitIdle(gfxQueue);
+    vkDeviceWaitIdle(device);
     for (uint32_t i=0; i<MAX_FRAMES_IN_FLIGHT; i++) {
         vkDestroySemaphore(device, imageAvailable[i], nullptr);
         vkDestroySemaphore(device, renderingDone[i], nullptr);
@@ -388,9 +385,13 @@ void Engine::createSwapchain() {
 void Engine::recreateSwapchain() {
     vkDeviceWaitIdle(device);
     cleanupSwapchain();
+    createColorAttachment();
     createSwapchain();
 }
 void Engine::cleanupSwapchain() {
+    vkDestroyImage(device, colorImage, nullptr);
+    vkDestroyImageView(device, colorImageView, nullptr);
+    vkFreeMemory(device, colorImageMemory, nullptr);
     for (auto& imageView: swapchainImageViews) {
         vkDestroyImageView(device, imageView, nullptr);
     }
@@ -893,11 +894,9 @@ void Engine::createTextureImage() {
     memcpy(data, pixels, (size_t)textureSize);
     vkUnmapMemory(device, stagingBufferMemory);
 
-    VkCommandBuffer cmdBuffer = beginSingleCommandRecording(transferCmdPool);
+    VkCommandBuffer cmdBuffer = beginSingleCommandRecording(gfxCmdPool);
     transitionImageLayout(textureImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, cmdBuffer);
     copyBufferToImage(cmdBuffer, stagingBuffer, textureImage, texWidth, texHeight);
-    endSingleCommandRecording(cmdBuffer, transferQueue);
-    cmdBuffer = beginSingleCommandRecording(gfxCmdPool);
     transitionImageLayout(textureImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, cmdBuffer);
     endSingleCommandRecording(cmdBuffer, gfxQueue);
     
