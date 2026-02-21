@@ -3,6 +3,7 @@
 #extension GL_EXT_scalar_block_layout: require
 
 layout(location = 0) out vec3 fragColor;
+layout(location = 1) out vec2 uv;
 
 struct Vertex {
     float vx, vy, vz;
@@ -33,4 +34,5 @@ void main() {
         vertexBuffer.vertices[gl_VertexIndex].nx, 
         vertexBuffer.vertices[gl_VertexIndex].ny, 
         vertexBuffer.vertices[gl_VertexIndex].nz);
+    uv = vec2(vertexBuffer.vertices[gl_VertexIndex].u, vertexBuffer.vertices[gl_VertexIndex].v);
 }

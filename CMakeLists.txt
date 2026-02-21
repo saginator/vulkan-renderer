@@ -32,6 +32,8 @@ add_executable(vulkan
 )
 add_dependencies(vulkan shaders)
 
+target_include_directories(vulkan PRIVATE stb)
+
 target_include_directories(vulkan PRIVATE
     ${Vulkan_INCLUDE_DIRS}
 )

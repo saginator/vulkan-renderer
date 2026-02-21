@@ -57,6 +57,9 @@ struct Engine {
     void createVertexBuffer();
     void createIndexBuffer();
     void createMVP();
+    void createTextureImage();
+    void createTextureSampler();
+    void createImage(VkImage& image, VkDeviceMemory& imageMemory, VkFormat format, VkExtent3D extent, VkImageUsageFlags usage);
 
     GLFWwindow* window;
     VkInstance instance;
@@ -73,9 +76,11 @@ struct Engine {
     std::vector<VkImage> swapchainImages;
     std::vector<VkImageView> swapchainImageViews;
     VkPipeline gfxPipeline;
-    VkDescriptorSetLayout gfxDescriptorSetLayout;
+    VkDescriptorSetLayout gfxDescriptorSetLayoutUniform;
+    VkDescriptorSetLayout gfxDescriptorSetLayoutSampler;
     VkDescriptorPool gfxDescriptorPool;
     std::vector<VkDescriptorSet> gfxDescriptorSets;
+    VkDescriptorSet gfxDescriptorSetSampler;
     VkPipelineLayout gfxPipelineLayout;
     VkCommandPool gfxCmdPool;
     VkCommandPool presentCmdPool;
@@ -91,6 +96,10 @@ struct Engine {
     std::vector<VkBuffer> MVPBuffers;
     std::vector<VkDeviceMemory> MVPBufferMemory;
     std::vector<void*> MVPBufferMemoryMapped;
+    VkImage textureImage;
+    VkImageView textureImageView;
+    VkDeviceMemory textureImageMemory;
+    VkSampler textureSampler;
 
     const uint32_t WIDTH = 800;
     const uint32_t HEIGHT = 600;
@@ -107,10 +116,10 @@ struct Engine {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME
     };
     const std::vector<Vertex> vertices = {
-        {-0.5f, -0.5f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+        {-0.5f, -0.5f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f},
         {0.5f, -0.5f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f},
-        {0.5f, 0.5f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f},
-        {-0.5f, 0.5f, 0.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f}
+        {0.5f, 0.5f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f},
+        {-0.5f, 0.5f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f}
     };
     const std::vector<uint32_t> indices = {
         0, 1, 2, 2, 3, 0
@@ -127,6 +136,10 @@ struct Engine {
     VkSurfaceFormatKHR chooseSurfaceFormat(std::vector<VkSurfaceFormatKHR> formats);
     VkCommandBuffer allocateCommandBuffer(VkCommandPool& cmdPool);
     uint32_t getMemoryTypeIndex(uint32_t typeFilter, VkMemoryPropertyFlags memProperties);
-    void copyBuffer(VkBuffer& srcBuffer, VkBuffer& dstBuffer, VkDeviceSize size);
+    void copyBuffer(VkCommandBuffer& cmdBuffer, VkBuffer& srcBuffer, VkBuffer& dstBuffer, VkDeviceSize size);
+    void copyBufferToImage(VkCommandBuffer& cmdBuffer, VkBuffer& srcBuffer, VkImage& dstImage, uint32_t width, uint32_t height);
     void updateMVP(uint32_t currFrame);
+    VkCommandBuffer beginSingleCommandRecording(VkCommandPool& cmdPool);
+    void endSingleCommandRecording(VkCommandBuffer& cmdBuffer, VkQueue& queue);
+    void transitionImageLayout(VkImage& image, VkImageLayout oldLayout, VkImageLayout newLayout, VkCommandBuffer& cmdBuffer);
 };
