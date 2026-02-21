@@ -16,6 +16,7 @@ Engine::Engine() {
     createCommandPool(gfxCmdPool, queueFamilyIndices.graphicsFamily.value());
     createCommandPool(presentCmdPool, queueFamilyIndices.presentFamily.value());
     createCommandPool(transferCmdPool, queueFamilyIndices.transferFamily.value());
+    createColorAttachment();
     createTextureImage();
     createTextureSampler();
     createDescriptorSetLayout();
@@ -27,6 +28,9 @@ Engine::Engine() {
     createIndexBuffer();
 }
 Engine::~Engine() {
+    vkDestroyImage(device, colorImage, nullptr);
+    vkDestroyImageView(device, colorImageView, nullptr);
+    vkFreeMemory(device, colorImageMemory, nullptr);
     vkDestroySampler(device, textureSampler, nullptr);
     vkDestroyImage(device, textureImage, nullptr);
     vkDestroyImageView(device, textureImageView, nullptr);
@@ -108,7 +112,7 @@ void Engine::run() {
             .pNext = nullptr,
             .semaphore = renderingDone[currFrame],
             .value = 0,
-            .stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .stageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
             .deviceIndex = 0
         };
         VkSubmitInfo2 submitInfo{
@@ -159,12 +163,10 @@ void Engine::recordCmdBuffer(VkCommandBuffer& cmdBuffer, uint32_t imageIndex) {
     };
     vkBeginCommandBuffer(cmdBuffer, &cmdBufferBegin);
     {
-        transitionImageLayout(swapchainImages[imageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, cmdBuffer);
-
         VkRenderingAttachmentInfo colorAttachmentInfo{
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
             .pNext = nullptr,
-            .imageView = swapchainImageViews[imageIndex],
+            .imageView = colorImageView,
             .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             .resolveMode = VK_RESOLVE_MODE_NONE,
             .resolveImageView = VK_NULL_HANDLE,
@@ -226,7 +228,12 @@ void Engine::recordCmdBuffer(VkCommandBuffer& cmdBuffer, uint32_t imageIndex) {
         }
         vkCmdEndRendering(cmdBuffer);
 
-        transitionImageLayout(swapchainImages[imageIndex], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, cmdBuffer);
+        transitionImageLayout(colorImage, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, cmdBuffer);
+        transitionImageLayout(swapchainImages[imageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, cmdBuffer);
+        copyImage(cmdBuffer, colorImage, swapchainImages[imageIndex], 
+            VkExtent3D{.width = swapchainExtent.width, .height = swapchainExtent.height, .depth = 1});
+        transitionImageLayout(swapchainImages[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, cmdBuffer);
+        transitionImageLayout(colorImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, cmdBuffer);
     }
     vkEndCommandBuffer(cmdBuffer);
 }
@@ -348,7 +355,7 @@ void Engine::createSwapchain() {
         .imageColorSpace = surfaceFormat.colorSpace,
         .imageExtent = swapchainExtent,
         .imageArrayLayers = 1,
-        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .queueFamilyIndexCount = 0,
         .pQueueFamilyIndices = nullptr,
@@ -491,7 +498,7 @@ void Engine::createDescriptorSets() {
         };
         vkUpdateDescriptorSets(device, 1, &writeDescriptroSet, 0, nullptr);
     }
-    
+
     descriptorSetAllocateInfo.descriptorSetCount = 1;
     descriptorSetAllocateInfo.pSetLayouts = &gfxDescriptorSetLayoutSampler;
     VK_CHECK(vkAllocateDescriptorSets(device, &descriptorSetAllocateInfo, &gfxDescriptorSetSampler));
@@ -956,6 +963,18 @@ void Engine::createImage(VkImage& image, VkDeviceMemory& imageMemory, VkFormat f
 
     VK_CHECK(vkBindImageMemory(device, image, imageMemory, 0));
 }
+void Engine::createColorAttachment() {
+    createImage(colorImage, colorImageMemory, swapchainFormat, 
+        VkExtent3D{.width = swapchainExtent.width, .height = swapchainExtent.height, .depth = 1}, 
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+    createImageView(colorImage, colorImageView, VK_IMAGE_ASPECT_COLOR_BIT, swapchainFormat);
+    VkCommandBuffer cmdBuffer = beginSingleCommandRecording(gfxCmdPool);
+    transitionImageLayout(colorImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, cmdBuffer);
+    endSingleCommandRecording(cmdBuffer, gfxQueue);
+}
+void Engine::createDepthAttachment() {
+
+}
 
 bool Engine::checkInstanceLayersSupport() {
     uint32_t count;
@@ -1202,7 +1221,23 @@ void Engine::transitionImageLayout(VkImage& image, VkImageLayout oldLayout, VkIm
         srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
         dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
         dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    } else if (oldLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
+        srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+        dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+        srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        dstAccessMask = VK_ACCESS_2_NONE;
+        dstStageMask = VK_PIPELINE_STAGE_2_NONE;
+    } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
+        srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+        srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
     }
+
     VkImageMemoryBarrier2 imageMemoryBarrier{
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
         .pNext = nullptr,
@@ -1235,4 +1270,33 @@ void Engine::transitionImageLayout(VkImage& image, VkImageLayout oldLayout, VkIm
         .pImageMemoryBarriers = &imageMemoryBarrier
     };
     vkCmdPipelineBarrier2(cmdBuffer, &dependencyInfo);
+}
+void Engine::copyImage(VkCommandBuffer& cmdBuffer, VkImage& srcImage, VkImage& dstImage, VkExtent3D extent) {
+    VkImageCopy region{
+        .srcSubresource{
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+        .srcOffset{
+            .x = 0,
+            .y = 0,
+            .z = 0
+        },
+        .dstSubresource{
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+        .dstOffset{
+            .x = 0,
+            .y = 0,
+            .z = 0
+        },
+        .extent = extent
+    };
+    vkCmdCopyImage(cmdBuffer, srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dstImage, 
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 }

@@ -60,6 +60,8 @@ struct Engine {
     void createTextureImage();
     void createTextureSampler();
     void createImage(VkImage& image, VkDeviceMemory& imageMemory, VkFormat format, VkExtent3D extent, VkImageUsageFlags usage);
+    void createColorAttachment();
+    void createDepthAttachment();
 
     GLFWwindow* window;
     VkInstance instance;
@@ -100,6 +102,12 @@ struct Engine {
     VkImageView textureImageView;
     VkDeviceMemory textureImageMemory;
     VkSampler textureSampler;
+    VkImage depthImage;
+    VkImageView depthImageView;
+    VkDeviceMemory depthImageMemory;
+    VkImage colorImage;
+    VkImageView colorImageView;
+    VkDeviceMemory colorImageMemory;
 
     const uint32_t WIDTH = 800;
     const uint32_t HEIGHT = 600;
@@ -142,4 +150,5 @@ struct Engine {
     VkCommandBuffer beginSingleCommandRecording(VkCommandPool& cmdPool);
     void endSingleCommandRecording(VkCommandBuffer& cmdBuffer, VkQueue& queue);
     void transitionImageLayout(VkImage& image, VkImageLayout oldLayout, VkImageLayout newLayout, VkCommandBuffer& cmdBuffer);
+    void copyImage(VkCommandBuffer& cmdBuffer, VkImage& srcImage, VkImage& dstImage, VkExtent3D extent);
 };
