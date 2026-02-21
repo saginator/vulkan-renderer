@@ -23,6 +23,11 @@ struct Vertex {
 struct PushConstants {
     VkDeviceAddress vertexBufferAddress;
 };
+struct MVP {
+    glm::mat4 model;
+    glm::mat4 view;
+    glm::mat4 proj;
+};
 
 struct Engine {
     Engine();
@@ -38,6 +43,9 @@ struct Engine {
     void recreateSwapchain();
     void cleanupSwapchain();
     void createImageView(VkImage& image, VkImageView& imageView, VkImageAspectFlags aspectMask, VkFormat format);
+    void createDescriptorSetLayout();
+    void createDescriptorPool();
+    void createDescriptorSets();
     void createGfxPipelineLayout();
     void createGfxPipeline();
     void createShaderModule(std::vector<char> code, VkShaderModule& shaderModule);
@@ -48,6 +56,7 @@ struct Engine {
         VkMemoryPropertyFlags memProperties);
     void createVertexBuffer();
     void createIndexBuffer();
+    void createMVP();
 
     GLFWwindow* window;
     VkInstance instance;
@@ -64,6 +73,9 @@ struct Engine {
     std::vector<VkImage> swapchainImages;
     std::vector<VkImageView> swapchainImageViews;
     VkPipeline gfxPipeline;
+    VkDescriptorSetLayout gfxDescriptorSetLayout;
+    VkDescriptorPool gfxDescriptorPool;
+    std::vector<VkDescriptorSet> gfxDescriptorSets;
     VkPipelineLayout gfxPipelineLayout;
     VkCommandPool gfxCmdPool;
     VkCommandPool presentCmdPool;
@@ -76,6 +88,9 @@ struct Engine {
     VkDeviceMemory indexBufferMemory;
     VkDeviceSize indexBufferSize;
     PushConstants pushConstants;
+    std::vector<VkBuffer> MVPBuffers;
+    std::vector<VkDeviceMemory> MVPBufferMemory;
+    std::vector<void*> MVPBufferMemoryMapped;
 
     const uint32_t WIDTH = 800;
     const uint32_t HEIGHT = 600;
@@ -113,4 +128,5 @@ struct Engine {
     VkCommandBuffer allocateCommandBuffer(VkCommandPool& cmdPool);
     uint32_t getMemoryTypeIndex(uint32_t typeFilter, VkMemoryPropertyFlags memProperties);
     void copyBuffer(VkBuffer& srcBuffer, VkBuffer& dstBuffer, VkDeviceSize size);
+    void updateMVP(uint32_t currFrame);
 };

@@ -11,6 +11,10 @@ Engine::Engine() {
     createSurface();
     createDevice();
     createSwapchain();
+    createMVP();
+    createDescriptorSetLayout();
+    createDescriptorPool();
+    createDescriptorSets();
     createGfxPipelineLayout();
     createGfxPipeline();
     createCommandPool(gfxCmdPool, queueFamilyIndices.graphicsFamily.value());
@@ -20,6 +24,12 @@ Engine::Engine() {
     createIndexBuffer();
 }
 Engine::~Engine() {
+    for (uint32_t i=0; i<MAX_FRAMES_IN_FLIGHT; i++) {
+        vkDestroyBuffer(device, MVPBuffers[i], nullptr);
+        vkFreeMemory(device, MVPBufferMemory[i], nullptr);
+    }
+    vkDestroyBuffer(device, indexBuffer, nullptr);
+    vkFreeMemory(device, indexBufferMemory, nullptr);
     vkDestroyBuffer(device, vertexBuffer, nullptr);
     vkFreeMemory(device, vertexBufferMemory, nullptr);
     vkDestroyCommandPool(device, transferCmdPool, nullptr);
@@ -27,6 +37,8 @@ Engine::~Engine() {
     vkDestroyCommandPool(device, gfxCmdPool, nullptr);
     vkDestroyPipeline(device, gfxPipeline, nullptr);
     vkDestroyPipelineLayout(device, gfxPipelineLayout, nullptr);
+    vkDestroyDescriptorPool(device, gfxDescriptorPool, nullptr);
+    vkDestroyDescriptorSetLayout(device, gfxDescriptorSetLayout, nullptr);
     cleanupSwapchain();
     vkDestroyDevice(device, nullptr);
     vkDestroySurfaceKHR(instance, surface, nullptr);
@@ -65,6 +77,8 @@ void Engine::run() {
         vkResetFences(device, 1, &cmdBufferReady[currFrame]);
 
         vkResetCommandBuffer(gfxCmdBuffers[currFrame], 0);
+
+        updateMVP(currFrame);
         recordCmdBuffer(gfxCmdBuffers[currFrame], imageIndex);
 
         VkCommandBufferSubmitInfo cmdBufferSubmitInfo{
@@ -175,6 +189,7 @@ void Engine::recordCmdBuffer(VkCommandBuffer& cmdBuffer, uint32_t imageIndex) {
         {
             vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gfxPipeline);
             vkCmdBindIndexBuffer(cmdBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gfxPipelineLayout, 0, 1, &gfxDescriptorSets[currFrame], 0, nullptr);
 
             VkViewport viewport{
                 .x = 0.0f,
@@ -384,6 +399,71 @@ void Engine::createImageView(VkImage& image, VkImageView& imageView, VkImageAspe
     };
     VK_CHECK(vkCreateImageView(device, &imageViewCI, nullptr, &imageView));
 }
+void Engine::createDescriptorSetLayout() {
+    VkDescriptorSetLayoutBinding descriptorSetLayoutBinding{
+        .binding = 0,
+        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = 1,
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        .pImmutableSamplers = nullptr
+    };
+    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCI{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .bindingCount = 1,
+        .pBindings = &descriptorSetLayoutBinding
+    };
+    VK_CHECK(vkCreateDescriptorSetLayout(device, &descriptorSetLayoutCI, nullptr, &gfxDescriptorSetLayout));
+}
+void Engine::createDescriptorPool() {
+    VkDescriptorPoolSize poolSize{
+        .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = MAX_FRAMES_IN_FLIGHT
+    };
+    VkDescriptorPoolCreateInfo descriptorPoolCI{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .maxSets = MAX_FRAMES_IN_FLIGHT,
+        .poolSizeCount = 1,
+        .pPoolSizes = &poolSize
+    };
+    VK_CHECK(vkCreateDescriptorPool(device, &descriptorPoolCI, nullptr, &gfxDescriptorPool));
+}
+void Engine::createDescriptorSets() {
+    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, gfxDescriptorSetLayout);
+    VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .pNext = nullptr,
+        .descriptorPool = gfxDescriptorPool,
+        .descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
+        .pSetLayouts = layouts.data()
+    };
+    gfxDescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+    VK_CHECK(vkAllocateDescriptorSets(device, &descriptorSetAllocateInfo, gfxDescriptorSets.data()));
+
+    for (uint32_t i=0; i<MAX_FRAMES_IN_FLIGHT; i++) {
+        VkDescriptorBufferInfo descriptorBufferInfo{
+            .buffer = MVPBuffers[i],
+            .offset = 0,
+            .range = sizeof(MVP)
+        };
+        VkWriteDescriptorSet writeDescriptroSet{
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .pNext = nullptr,
+            .dstSet = gfxDescriptorSets[i],
+            .dstBinding = 0,
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .pImageInfo = nullptr,
+            .pBufferInfo = &descriptorBufferInfo,
+            .pTexelBufferView = nullptr,
+        };
+        vkUpdateDescriptorSets(device, 1, &writeDescriptroSet, 0, nullptr);
+    }
+}
 void Engine::createGfxPipelineLayout() {
     VkPushConstantRange pushConstantRange{
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
@@ -395,8 +475,8 @@ void Engine::createGfxPipelineLayout() {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .pNext = nullptr,
         .flags = 0,
-        .setLayoutCount = 0,
-        .pSetLayouts = nullptr,
+        .setLayoutCount = 1,
+        .pSetLayouts = &gfxDescriptorSetLayout,
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &pushConstantRange
     };
@@ -480,7 +560,7 @@ void Engine::createGfxPipeline() {
         .rasterizerDiscardEnable = VK_FALSE,
         .polygonMode = VK_POLYGON_MODE_FILL,
         .cullMode = VK_CULL_MODE_BACK_BIT,
-        .frontFace = VK_FRONT_FACE_CLOCKWISE,
+        .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
         .depthBiasEnable = VK_FALSE,
         .depthBiasConstantFactor = 0.0f,
         .depthBiasClamp = 0.0f,
@@ -720,6 +800,16 @@ void Engine::createIndexBuffer() {
     vkDestroyBuffer(device, stagingBuffer, nullptr);
     vkFreeMemory(device, stagingBufferMemory, nullptr);
 }
+void Engine::createMVP() {
+    MVPBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+    MVPBufferMemory.resize(MAX_FRAMES_IN_FLIGHT);
+    MVPBufferMemoryMapped.resize(MAX_FRAMES_IN_FLIGHT);
+    for (uint32_t i=0; i<MAX_FRAMES_IN_FLIGHT; i++) {
+        createBuffer(MVPBuffers[i], MVPBufferMemory[i], sizeof(MVP), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, 
+            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+        vkMapMemory(device, MVPBufferMemory[i], 0, sizeof(MVP), 0, &MVPBufferMemoryMapped[i]);
+    }
+}
 
 bool Engine::checkInstanceLayersSupport() {
     uint32_t count;
@@ -900,4 +990,15 @@ void Engine::copyBuffer(VkBuffer& srcBuffer, VkBuffer& dstBuffer, VkDeviceSize s
     VK_CHECK(vkQueueSubmit2(transferQueue, 1, &submitInfo, fence));
     vkWaitForFences(device, 1, &fence, VK_TRUE, ~0ull);
     vkDestroyFence(device, fence, nullptr);
+}
+void Engine::updateMVP(uint32_t index) {
+    MVP mvp;
+    static auto startTime = std::chrono::high_resolution_clock::now();
+    auto currentTime = std::chrono::high_resolution_clock::now();
+    float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+    mvp.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    mvp.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    mvp.proj = glm::perspective(glm::radians(45.0f), (float)swapchainExtent.width/swapchainExtent.height, 0.1f, 10.0f);
+    mvp.proj[1][1]*=-1;
+    memcpy(MVPBufferMemoryMapped[index], &mvp, sizeof(MVP));
 }
